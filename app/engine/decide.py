@@ -12,6 +12,8 @@ from app.db.models import (
     RevenueEvent, RootCause
 )
 from app.engine.strategy import amount_band, rank_candidates
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -284,11 +286,27 @@ async def decide_action(event: RevenueEvent, diagnosis: Diagnosis, db_session: A
         decision_source = "evidence_ranked_policy"
         model_name = None
 
+        attempt_number = event.retry_count + 1
+
+    # Idempotency check — reuse existing action for this exact attempt
+    existing = await db_session.execute(
+        select(ProposedAction).where(
+            ProposedAction.event_id == event.id,
+            ProposedAction.attempt_number == attempt_number,
+        )
+    )
+    existing_action = existing.scalar_one_or_none()
+    if existing_action:
+        logger.info(
+            f"ProposedAction already exists for event {event.id} attempt {attempt_number}, reusing"
+        )
+        return existing_action
+
     proposed_action = ProposedAction(
         event_id=event.id,
         action_type=action_type,
         channel=channel,
-        attempt_number=event.retry_count + 1,
+        attempt_number=attempt_number,
         context_json={
             "diagnosis_root_cause": diagnosis.root_cause.value,
             "diagnosis_source": diagnosis.source.value,
@@ -299,10 +317,49 @@ async def decide_action(event: RevenueEvent, diagnosis: Diagnosis, db_session: A
         }
     )
     db_session.add(proposed_action)
-    await db_session.flush()
+
+    try:
+        await db_session.flush()
+    except IntegrityError:
+        # Race: another worker inserted the same (event_id, attempt_number) first
+        await db_session.rollback()
+        logger.info(
+            f"Race detected for event {event.id} attempt {attempt_number}, fetching winner"
+        )
+        result = await db_session.execute(
+            select(ProposedAction).where(
+                ProposedAction.event_id == event.id,
+                ProposedAction.attempt_number == attempt_number,
+            )
+        )
+        proposed_action = result.scalar_one()
 
     logger.info(
         "Planner decision for event %s: %s via %s (%s)",
         event.id, action_type.value, channel.value, decision_source,
     )
     return proposed_action
+
+
+    # proposed_action = ProposedAction(
+    #     event_id=event.id,
+    #     action_type=action_type,
+    #     channel=channel,
+    #     attempt_number=event.retry_count + 1,
+    #     context_json={
+    #         "diagnosis_root_cause": diagnosis.root_cause.value,
+    #         "diagnosis_source": diagnosis.source.value,
+    #         "decision_source": decision_source,
+    #         "planner_rationale": rationale,
+    #         "planner_model": model_name,
+    #         **planner_context,
+    #     }
+    # )
+    # db_session.add(proposed_action)
+    # await db_session.flush()
+
+    # logger.info(
+    #     "Planner decision for event %s: %s via %s (%s)",
+    #     event.id, action_type.value, channel.value, decision_source,
+    # )
+    # return proposed_action

@@ -208,8 +208,6 @@ async def process_event(event_id: str, db_session: AsyncSession) -> None:
         await db_session.commit()
 
     except Exception as e:
-        logger.exception("Error processing event %s: %s", event.id, e)
-        event.status = RevenueEventStatus.FAILED
-        event.last_error = str(e)
         await db_session.rollback()
+        logger.exception("Error processing event %s: %s", event_id, e)  # use the event_id param, not event.id
         raise

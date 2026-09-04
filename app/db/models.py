@@ -303,7 +303,7 @@ class ProposedAction(Base):
 
     # Foreign key to RevenueEvent
     event_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("revenue_events.id", ondelete="CASCADE"), nullable=False, unique=True
+        String(36), ForeignKey("revenue_events.id", ondelete="CASCADE"), nullable=False
     )
 
     # Action details
@@ -321,6 +321,10 @@ class ProposedAction(Base):
 
     # Relationship
     event: Mapped["RevenueEvent"] = relationship("RevenueEvent", back_populates="proposed_action")
+
+    __table_args__ = (
+    UniqueConstraint("event_id", "attempt_number", name="uq_proposed_action_event_attempt"),
+)
 
 
 # =============================================================================

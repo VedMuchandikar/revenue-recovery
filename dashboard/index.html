@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Revenue Recovery AI Agent Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-6xl mx-auto">
+        <h1 class="text-3xl font-bold text-gray-900 mb-6">Revenue Recovery Dashboard</h1>
+        <div id="metrics" class="grid grid-cols-4 gap-4 mb-8">
+            <div class="bg-white p-4 rounded shadow"><div class="text-sm text-gray-500">At Risk</div><div id="at-risk" class="text-2xl font-bold">₹0</div></div>
+            <div class="bg-white p-4 rounded shadow"><div class="text-sm text-gray-500">Recovered</div><div id="recovered" class="text-2xl font-bold">₹0</div></div>
+            <div class="bg-white p-4 rounded shadow"><div class="text-sm text-gray-500">Recovery Rate</div><div id="rate" class="text-2xl font-bold">0%</div></div>
+            <div class="bg-white p-4 rounded shadow"><div class="text-sm text-gray-500">Pending Events</div><div id="pending" class="text-2xl font-bold">0</div></div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-white rounded shadow p-4">
+            <h2 class="text-xl font-bold mb-4">Recent Events</h2>
+            <div id="events-list" class="space-y-2">Loading...</div>
+        </div>
+        <div class="bg-white rounded shadow p-4">
+            <h2 class="text-xl font-bold mb-1">Agent Strategy Evidence</h2>
+            <p class="text-sm text-gray-500 mb-4">Verified recovery outcomes rank only policy-approved interventions.</p>
+            <div id="strategy-list" class="space-y-2">Loading...</div>
+        </div>
+        </div>
+        <div id="agent-trace" class="hidden mt-6 bg-slate-900 text-slate-100 rounded shadow p-6">
+            <div class="flex justify-between items-start mb-4">
+                <div><h2 class="text-xl font-bold">Agent Decision Trace</h2><p id="trace-subtitle" class="text-sm text-slate-300"></p></div>
+                <button onclick="closeTrace()" class="text-slate-300 hover:text-white">Close</button>
+            </div>
+            <div id="trace-steps" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+        </div>
+    </div>
+    <script>
+        async function load() {
+            try {
+                const mRes = await fetch('/api/metrics/overview');
+                const m = await mRes.json();
+                document.getElementById('at-risk').textContent = '₹' + (m.total_at_risk || 0);
+                document.getElementById('recovered').textContent = '₹' + (m.total_recovered || 0);
+                document.getElementById('rate').textContent = (m.recovery_rate || 0) + '%';
+                document.getElementById('pending').textContent = m.pending_count || 0;
+
+                const eRes = await fetch('/api/events?limit=20');
+                const events = await eRes.json();
+                document.getElementById('events-list').innerHTML = events.map(e => `
+                    <button onclick="showTrace('${e.id}')" class="w-full p-3 border rounded flex justify-between items-center text-left hover:bg-slate-50">
+                        <div><strong>${e.type}</strong> - ${e.customer_id}</div>
+                        <div class="font-bold">₹${e.amount}</div>
+                        <div class="px-2 py-1 bg-blue-100 rounded text-xs">${e.status}</div>
+                    </button>
+                `).join('');
+
+                const sRes = await fetch('/api/metrics/strategy');
+                const strategy = await sRes.json();
+                document.getElementById('strategy-list').innerHTML = strategy.strategies.length
+                    ? strategy.strategies.map(s => `
+                        <div class="p-3 border rounded flex justify-between items-center">
+                            <div><strong>${s.action_type}</strong><span class="text-gray-500"> via ${s.channel}</span></div>
+                            <div class="text-right"><div class="font-bold">${s.recovery_rate}% recovered</div><div class="text-xs text-gray-500">${s.verified_recoveries}/${s.attempts} verified · score ${s.planner_score}</div></div>
+                        </div>
+                    `).join('')
+                    : '<div class="text-gray-500">No completed interventions yet. The agent starts with a neutral prior and learns from verified webhooks.</div>';
+            } catch(e) {
+                console.error(e);
+            }
+        }
+
+        function closeTrace() {
+            document.getElementById('agent-trace').classList.add('hidden');
+        }
+
+        function step(title, body, accent = 'border-slate-600') {
+            return `<div class="border-l-4 ${accent} bg-slate-800 p-4 rounded-r"><div class="font-semibold">${title}</div><div class="mt-1 text-sm text-slate-300">${body}</div></div>`;
+        }
+
+        async function showTrace(eventId) {
+            const [eventResponse, auditResponse] = await Promise.all([
+                fetch('/api/events/' + eventId),
+                fetch('/api/audit/' + eventId + '/trail')
+            ]);
+            const event = await eventResponse.json();
+            const audit = await auditResponse.json();
+            const decision = event.proposed_action;
+            const context = decision?.context_json || {};
+            const diagnosis = event.diagnosis;
+            const action = event.action_results?.at(-1);
+            const candidates = context.ranked_candidates || [];
+            const candidateText = candidates.length
+                ? candidates.map(c => `${c.action_type} via ${c.channel}: ${c.expected_recovery_score}`).join('<br>')
+                : 'No candidate ranking was recorded for this older event.';
+            const outcomeText = event.outcome
+                ? `Verified ₹${event.outcome.recovered_amount} via ${event.outcome.method}.`
+                : event.status === 'awaiting_payment'
+                    ? 'Action completed; waiting for Razorpay payment webhook confirmation.'
+                    : `No recovery was verified. Current state: ${event.status}.`;
+
+            document.getElementById('trace-subtitle').textContent = `${event.id} · ₹${event.amount} at risk · ${audit.trail.length} audit records`;
+            document.getElementById('trace-steps').innerHTML = [
+                step('1. Detect', `Received ${event.type}; reason: ${event.reason_code || 'not supplied'}.`, 'border-cyan-400'),
+                step('2. Diagnose', diagnosis ? `${diagnosis.root_cause} (${diagnosis.source}); ${diagnosis.rationale || ''}` : 'Not diagnosed yet.', 'border-violet-400'),
+                step('3. Plan within policy', candidateText, 'border-amber-400'),
+                step('4. Guardrails + execute', action ? `${action.status}: ${action.action_type} via ${action.channel}.` : 'No action was executed.', 'border-orange-400'),
+                step('5. Verify and learn', outcomeText, event.outcome ? 'border-emerald-400' : 'border-rose-400'),
+                step('Audit trail', audit.trail.map(item => item.stage).join(' → ') || 'No audit entries yet.', 'border-slate-400')
+            ].join('');
+            document.getElementById('agent-trace').classList.remove('hidden');
+            document.getElementById('agent-trace').scrollIntoView({behavior: 'smooth', block: 'start'});
+        }
+        load();
+    </script>
+</body>
+</html>

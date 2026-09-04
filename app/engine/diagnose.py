@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.config.settings import settings
 from app.db.models import (
@@ -270,6 +271,15 @@ async def diagnose_event(event: RevenueEvent, db_session: AsyncSession) -> Diagn
     Returns:
         Diagnosis record with root cause and metadata
     """
+
+    # Idempotency check: don't insert a duplicate diagnosis for this event
+    existing = await db_session.execute(
+        select(Diagnosis).where(Diagnosis.event_id == event.id)
+    )
+    existing_diagnosis = existing.scalar_one_or_none()
+    if existing_diagnosis:
+        logger.info(f"Diagnosis already exists for event {event.id}, reusing")
+        return existing_diagnosis
     # Step 1: Try rule-based diagnosis
     rule_result = _rule_based_diagnosis(event)
 
@@ -277,6 +287,7 @@ async def diagnose_event(event: RevenueEvent, db_session: AsyncSession) -> Diagn
         root_cause, rationale = rule_result
 
         # Check if we need Claude for unknown cases
+        
         if root_cause != RootCause.UNKNOWN:
             # Deterministic rule matched
             diagnosis = Diagnosis(

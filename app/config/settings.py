@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
 
-    # Anthropic Claude
-    anthropic_api_key: str = ""
+    # Groq
+    groq_api_key: str = ""
     planner_use_llm: bool = True
 
     # Recovery Configuration

@@ -54,9 +54,13 @@ async def check_cooldown(event: RevenueEvent, state: Optional[StoppingRuleState]
         return (True, "No previous action - no cooldown required")
 
     now = datetime.now(timezone.utc)
+    cooldown_until = state.cooldown_until
 
-    if now < state.cooldown_until:
-        remaining_seconds = (state.cooldown_until - now).total_seconds()
+    if cooldown_until.tzinfo is None:
+        cooldown_until = cooldown_until.replace(tzinfo=timezone.utc)
+
+    if now < cooldown_until:
+        remaining_seconds = (cooldown_until - now).total_seconds()
         remaining_minutes = remaining_seconds / 60
         return (False, f"Cooldown active: {remaining_minutes:.1f} minutes remaining")
 

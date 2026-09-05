@@ -93,7 +93,7 @@ async def _llm_decision(event: RevenueEvent, diagnosis: Diagnosis, context: dict
         Dict with action_type, channel, rationale or None if Groq fails
     """
     # Check if API key is configured
-    if not settings.planner_use_llm or not settings.anthropic_api_key:
+    if not settings.planner_use_llm or not settings.groq_api_key:
         logger.info("LLM planner disabled or not configured; using evidence-ranked policy")
         return None
 
@@ -153,7 +153,7 @@ Choose the most appropriate action based on:
             response = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {settings.anthropic_api_key}",
+                    "Authorization": f"Bearer {settings.groq_api_key}",
                     "Content-Type": "application/json"
                 },
                 json={
@@ -286,8 +286,8 @@ async def decide_action(event: RevenueEvent, diagnosis: Diagnosis, db_session: A
         decision_source = "evidence_ranked_policy"
         model_name = None
 
-        attempt_number = event.retry_count + 1
 
+    attempt_number = event.retry_count + 1
     # Idempotency check — reuse existing action for this exact attempt
     existing = await db_session.execute(
         select(ProposedAction).where(

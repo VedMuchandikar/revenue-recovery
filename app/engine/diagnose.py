@@ -130,7 +130,7 @@ async def _llm_diagnosis(event: RevenueEvent) -> Optional[dict]:
         Dict with root_cause, confidence, rationale or None if Groq fails
     """
     # Check if API key is configured
-    if not settings.anthropic_api_key:
+    if not settings.groq_api_key:
         logger.warning("Groq diagnosis skipped: API_KEY not configured")
         return None
 
@@ -190,7 +190,7 @@ If confidence is below {settings.claude_confidence_threshold}, set rootCause to 
             response = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {settings.anthropic_api_key}",
+                    "Authorization": f"Bearer {settings.groq_api_key}",
                     "Content-Type": "application/json"
                 },
                 json={

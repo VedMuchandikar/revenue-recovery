@@ -22,10 +22,33 @@ EVENTS_TO_CREATE = [
 
 
 async def create_test_events():
-    """Create test PENDING events."""
+    """Create test PENDING events if they don't already exist."""
     from app.db.models import RevenueEventType
+
     async with async_session_factory() as session:
+        created_count = 0
+        skipped_count = 0
+
         for i, (reason, amount, email) in enumerate(EVENTS_TO_CREATE):
+            provider_event_id = f"prov_demo_{i+1}"
+
+            result = await session.execute(
+                select(RevenueEvent).where(
+                    RevenueEvent.provider_event_id == provider_event_id
+                )
+            )
+            existing_event = result.scalar_one_or_none()
+
+            if existing_event:
+                logger.info(
+                    f"  ↷ Already exists: {existing_event.id} "
+                    f"(status={existing_event.status.value})"
+                )
+                skipped_count += 1
+                continue
+
+            now = datetime.now()
+
             event = RevenueEvent(
                 id=f"demo-event-{i+1}",
                 type=RevenueEventType.PAYMENT_FAILED,
@@ -34,17 +57,23 @@ async def create_test_events():
                 currency="INR",
                 customer_id=email,
                 razorpay_ref_id=f"pay_demo_{i+1}",
-                provider_event_id=f"prov_demo_{i+1}",
+                provider_event_id=provider_event_id,
                 reason_code=reason,
                 retry_count=0,
-                detected_at=datetime.now(),
-                created_at=datetime.now(),
-                updated_at=datetime.now(),
+                detected_at=now,
+                created_at=now,
+                updated_at=now,
             )
+
             session.add(event)
+            created_count += 1
 
         await session.commit()
-        logger.info(f"Created {len(EVENTS_TO_CREATE)} test events")
+
+        logger.info(
+            f"Created {created_count} test events, "
+            f"skipped {skipped_count} existing events"
+        )
 
 
 async def process_all_pending():

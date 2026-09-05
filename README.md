@@ -42,6 +42,12 @@ This is deliberately not an unconstrained chatbot. It closes a recovery loop:
 source .venv/bin/activate
 python start.py
 ```
+## Run demo test
+
+```bash
+source .venv/bin/activate
+python run_agent.py
+```
 
 Open `http://localhost:8000`.
 
